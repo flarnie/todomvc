@@ -2,7 +2,7 @@
 /*jshint white:false */
 /*jshint trailing:false */
 /*jshint newcap:false */
-/*global React, Router*/
+/*global React, Router, createSubscription*/
 var app = app || {};
 
 (function () {
@@ -16,23 +16,45 @@ var app = app || {};
 
 	var ENTER_KEY = 13;
 
+        let currentValue = app.ALL_TODOS;
+
+        // TODO: make this an actual module import?
+        const RouterSubscription = createSubscription.createSubscription({
+          getValue(_) {
+            return currentValue;
+          },
+          subscribe(Router, callback) {
+            var router = Router({
+              '/': () => {
+                currentValue = app.ALL_TODOS;
+                callback(app.ALL_TODOS);
+              },
+              '/active': () => {
+                currentValue = app.ACTIVE_TODOS;
+                callback(app.ACTIVE_TODOS);
+              },
+              '/completed': () => {
+                currentValue = app.COMPLETED_TODOS;
+                callback(app.COMPLETED_TODOS);
+              },
+            });
+            // TODO: make clearer link between currentValue default and the
+            // value for '/'
+            router.init('/'); // we know current value should default to app.ALL_TODOS
+          },
+          unsubscribe(source, subscription) {
+            // TODO: confirm that there is no way to do this.
+            // Seems to be the case - docs here:
+            // https://github.com/flatiron/director
+          }
+        });
+
 	var TodoApp = React.createClass({
 		getInitialState: function () {
 			return {
-				nowShowing: app.ALL_TODOS,
 				editing: null,
 				newTodo: ''
 			};
-		},
-
-		componentDidMount: function () {
-			var setState = this.setState;
-			var router = Router({
-				'/': setState.bind(this, {nowShowing: app.ALL_TODOS}),
-				'/active': setState.bind(this, {nowShowing: app.ACTIVE_TODOS}),
-				'/completed': setState.bind(this, {nowShowing: app.COMPLETED_TODOS})
-			});
-			router.init('/');
 		},
 
 		handleChange: function (event) {
@@ -90,7 +112,7 @@ var app = app || {};
 			var todos = this.props.model.todos;
 
 			var shownTodos = todos.filter(function (todo) {
-				switch (this.state.nowShowing) {
+				switch (this.props.nowShowing) {
 				case app.ACTIVE_TODOS:
 					return !todo.completed;
 				case app.COMPLETED_TODOS:
@@ -126,7 +148,7 @@ var app = app || {};
 					<TodoFooter
 						count={activeTodoCount}
 						completedCount={completedCount}
-						nowShowing={this.state.nowShowing}
+						nowShowing={this.props.nowShowing}
 						onClearCompleted={this.clearCompleted}
 					/>;
 			}
@@ -175,7 +197,9 @@ var app = app || {};
 
 	function render() {
 		React.render(
-			<TodoApp model={model}/>,
+                  <RouterSubscription source={Router}>
+                    {nowShowing => <TodoApp nowShowing={nowShowing} model={model}/>}
+                  </RouterSubscription>,
 			document.getElementsByClassName('todoapp')[0]
 		);
 	}
