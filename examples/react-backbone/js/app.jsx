@@ -19,41 +19,43 @@ var app = app || {};
 
 	var ENTER_KEY = 13;
 
-	// An example generic Mixin that you can add to any component that should
-	// react to changes in a Backbone component. The use cases we've identified
-	// thus far are for Collections -- since they trigger a change event whenever
-	// any of their constituent items are changed there's no need to reconcile for
-	// regular models. One caveat: this relies on getBackboneCollections() to
-	// always return the same collection instances throughout the lifecycle of the
-	// component. If you're using this mixin correctly (it should be near the top
-	// of your component hierarchy) this should not be an issue.
-	var BackboneMixin = {
-		componentDidMount: function () {
-			// Whenever there may be a change in the Backbone data, trigger a
-			// reconcile.
-			this.getBackboneCollections().forEach(function (collection) {
-				// explicitly bind `null` to `forceUpdate`, as it demands a callback and
-				// React validates that it's a function. `collection` events passes
-				// additional arguments that are not functions
-				collection.on('add remove change', this.forceUpdate.bind(this, null));
-			}, this);
-		},
+        // TODO: this is ugly, convoluted, not sure it works well.
+        // Use the new context API instead?
+        // Do we recommend the new context API for any case where you have more
+        // than one subscription?
+        // In that case, is the helper wrapper still useful? :\
+        const BackboneSubscription = createSubscription.createSubscription({
+          getValue(backboneCollectionConfig) {
+            return backboneCollectionConfig;
+          },
 
-		componentWillUnmount: function () {
-			// Ensure that we clean up any dangling references when the component is
-			// destroyed.
-			this.getBackboneCollections().forEach(function (collection) {
-				collection.off(null, null, this);
-			}, this);
-		}
-	};
+          subscribe(backboneCollectionConfig, callback) {
+            // Whenever there may be a change in the Backbone data, trigger a
+            // reconcile.
+            Object.values(backboneCollectionConfig).forEach(function (collection) {
+              // explicitly bind backboneCollections as the argument,
+              // `collection` events passes additional arguments that we ignore
+              collection.on('add remove change', () => {
+                // make shallow copy, to force an update based on changed value
+                const updatedBackboneCollectionConfig = {};
+                Object.keys(backboneCollectionConfig).forEach(k => {
+                  updatedBackboneCollectionConfig[k] = backboneCollectionConfig[k];
+                });
+                callback(updatedBackboneCollectionConfig);
+              });
+            }, this);
+          },
+
+          unsubscribe(backboneCollectionConfig, _) {
+            // Ensure that we clean up any dangling references when the component is
+            // destroyed.
+            backboneCollectionConfig().forEach(function (collection) {
+              collection.off(null, null, this);
+            }, this);
+          },
+        });
 
 	var TodoApp = React.createClass({
-		mixins: [BackboneMixin],
-		getBackboneCollections: function () {
-			return [this.props.todos];
-		},
-
 		getInitialState: function () {
 			return {editing: null};
 		},
@@ -73,14 +75,14 @@ var app = app || {};
 			new Router();
 			Backbone.history.start();
 
-			this.props.todos.fetch();
+			this.props.collectionsConfig.todos.fetch();
 		},
 
 		componentDidUpdate: function () {
 			// If saving were expensive we'd listen for mutation events on Backbone and
 			// do this manually. however, since saving isn't expensive this is an
 			// elegant way to keep it reactively up-to-date.
-			this.props.todos.forEach(function (todo) {
+			this.props.collectionsConfig.todos.forEach(function (todo) {
 				todo.save();
 			});
 		},
@@ -92,10 +94,10 @@ var app = app || {};
 
 			var val = React.findDOMNode(this.refs.newField).value.trim();
 			if (val) {
-				this.props.todos.create({
+				this.props.collectionsConfig.todos.create({
 					title: val,
 					completed: false,
-					order: this.props.todos.nextOrder()
+					order: this.props.collectionsConfig.todos.nextOrder()
 				});
 				React.findDOMNode(this.refs.newField).value = '';
 			}
@@ -105,7 +107,7 @@ var app = app || {};
 
 		toggleAll: function (event) {
 			var checked = event.target.checked;
-			this.props.todos.forEach(function (todo) {
+			this.props.collectionsConfig.todos.forEach(function (todo) {
 				todo.set('completed', checked);
 			});
 		},
@@ -125,7 +127,7 @@ var app = app || {};
 		},
 
 		clearCompleted: function () {
-			this.props.todos.completed().forEach(function (todo) {
+			this.props.collectionsConfig.todos.completed().forEach(function (todo) {
 				todo.destroy();
 			});
 		},
@@ -133,7 +135,7 @@ var app = app || {};
 		render: function () {
 			var footer;
 			var main;
-			var todos = this.props.todos;
+			var todos = this.props.collectionsConfig.todos;
 
 			var shownTodos = todos.filter(function (todo) {
 				switch (this.state.nowShowing) {
@@ -217,7 +219,9 @@ var app = app || {};
 	});
 
 	React.render(
-		<TodoApp todos={app.todos} />,
+          <BackboneSubscription source={{todos: app.todos}}>
+            {collectionsConfig => <TodoApp collectionsConfig={collectionsConfig} />}
+          </BackboneSubscription>,
 		document.getElementsByClassName('todoapp')[0]
 	);
 })();
